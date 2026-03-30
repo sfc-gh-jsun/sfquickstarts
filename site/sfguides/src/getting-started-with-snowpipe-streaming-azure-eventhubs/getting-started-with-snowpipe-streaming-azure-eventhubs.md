@@ -1,7 +1,7 @@
 id: getting-started-with-snowpipe-streaming-azure-eventhubs
 categories: snowflake-site:taxonomy/solution-center/certification/quickstart, snowflake-site:taxonomy/product/platform
 language: en
-summary: This guide will walk you through how to apply a data-intensive approach to real-time data using Snowpipe Streaming and Azure Eventhubs. 
+summary: This guide will walk you through how to ingest real-time data into Snowflake using the High Performance (HP) Kafka Connector (v4.x) with Snowpipe Streaming and Azure Event Hubs.
 environments: web
 status: Published
 feedback link: https://github.com/Snowflake-Labs/sfguides/issues
@@ -29,7 +29,10 @@ The architecture diagram below shows the deployment. An Azure Event Hub and an [
 Virtual Machine](https://azure.microsoft.com/en-us/products/virtual-machines) (jumphost) will be provisioned in an [Azure Virtual Network](https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-overview). 
 The Linux jumphost will host the Kafka producer and Snowpipe streaming via [Kafka Connect](https://docs.snowflake.com/en/user-guide/kafka-connector-overview.html).
 
-The Kafka producer calls the data sources' REST API and receives time-series data in JSON format. This data is then ingested into the Kafka cluster before being picked up by the [Snowflake Connector for Kafka](https://docs.snowflake.com/en/user-guide/data-load-snowpipe-streaming-kafka) and delivered to a Snowflake table.
+The Kafka producer calls the data sources' REST API and receives time-series data in JSON format. This data is then ingested into the Kafka cluster before being picked up by the [Snowflake High Performance (HP) Kafka Connector](https://docs.snowflake.com/en/connectors/kafkahp/setup-kafka) (v4.x) and delivered to a Snowflake table. The HP connector uses a server-side architecture with a PIPE object in Snowflake that manages data processing and buffering, delivering up to 10 GB/s throughput per table with 5-10 second latency.
+
+> **Note:** This quickstart uses the Snowflake High Performance (HP) Kafka Connector (v4.x), which is currently in **Public Preview**.
+
 The data in Snowflake table can be visualized in real-time with [Azure Managed Grafana](https://azure.microsoft.com/en-us/products/managed-grafana) and [Streamlit](https://streamlit.io)
 The historical data can also be analyzed by BI tools like [Microsoft Power BI on Azure](https://azure.microsoft.com/en-us/products/power-bi).
 
@@ -53,7 +56,7 @@ To participate in the virtual hands-on lab, attendees need the following resourc
 ### What You'll Learn
 
 - Using [Azure Event Hubs](https://azure.microsoft.com/en-us/products/event-hubs).
-- Using [SnowSQL](https://docs.snowflake.com/en/user-guide/snowsql.html), the command line client for connecting to Snowflake to execute SQL queries and perform all DDL and DML operations, including loading data into and unloading data out of database tables.
+- Using the [Snowflake High Performance (HP) Kafka Connector](https://docs.snowflake.com/en/connectors/kafkahp/setup-kafka) for low-latency data ingestion
 - Using Snowflake to query tables populated with time-series data
 
 ### What You'll Build
@@ -144,21 +147,19 @@ mkdir -p $directory
 cd $directory
 pwd=`pwd`
 sudo yum clean all
-sudo yum -y install openssl vim-common java-1.8.0-openjdk-devel.x86_64 gzip tar jq python3-pip
-wget https://archive.apache.org/dist/kafka/2.8.1/kafka_2.12-2.8.1.tgz
-tar xvfz kafka_2.12-2.8.1.tgz -C $pwd
-rm -rf $pwd/kafka_2.12-2.8.1.tgz
-cd /tmp && cp /usr/lib/jvm/java-openjdk/jre/lib/security/cacerts kafka.client.truststore.jks
+sudo yum -y install openssl vim-common java-11-openjdk-devel gzip tar jq python3-pip
+wget https://archive.apache.org/dist/kafka/3.7.2/kafka_2.13-3.7.2.tgz
+tar xvfz kafka_2.13-3.7.2.tgz -C $pwd
+rm -rf $pwd/kafka_2.13-3.7.2.tgz
+cd /tmp && cp $(find /usr/lib/jvm -name cacerts 2>/dev/null | head -1) kafka.client.truststore.jks
 cd /tmp && keytool -genkey -keystore kafka.client.keystore.jks -validity 300 -storepass $passwd -keypass $passwd -dname "CN=snowflake.com" -alias snowflake -storetype pkcs12
 
-#Snowflake kafka connector
-wget https://repo1.maven.org/maven2/com/snowflake/snowflake-kafka-connector/2.2.1/snowflake-kafka-connector-2.2.1.jar -O $pwd/kafka_2.12-2.8.1/libs/snowflake-kafka-connector-2.2.1.jar
+#Snowflake High Performance (HP) Kafka connector v4.x (Public Preview) — uses server-side Snowpipe Streaming architecture
+#v4.x is an uber-jar that bundles snowflake-ingest-sdk and snowflake-jdbc internally
+wget https://repo1.maven.org/maven2/com/snowflake/snowflake-kafka-connector/4.0.0-rc8/snowflake-kafka-connector-4.0.0-rc8.jar -O $pwd/kafka_2.13-3.7.2/libs/snowflake-kafka-connector-4.0.0-rc8.jar
 
-#Snowpipe streaming SDK
-wget https://repo1.maven.org/maven2/net/snowflake/snowflake-ingest-sdk/2.1.0/snowflake-ingest-sdk-2.1.0.jar -O $pwd/kafka_2.12-2.8.1/libs/snowflake-ingest-sdk-2.1.0.jar
-wget https://repo1.maven.org/maven2/net/snowflake/snowflake-jdbc/3.14.5/snowflake-jdbc-3.14.5.jar -O $pwd/kafka_2.12-2.8.1/libs/snowflake-jdbc-3.14.5.jar
-wget https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/1.0.1/bc-fips-1.0.1.jar -O $pwd/kafka_2.12-2.8.1/libs/bc-fips-1.0.1.jar
-wget https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-fips/1.0.3/bcpkix-fips-1.0.3.jar -O $pwd/kafka_2.12-2.8.1/libs/bcpkix-fips-1.0.3.jar
+wget https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.0/bc-fips-2.1.0.jar -O $pwd/kafka_2.13-3.7.2/libs/bc-fips-2.1.0.jar
+wget https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-fips/2.1.8/bcpkix-fips-2.1.8.jar -O $pwd/kafka_2.13-3.7.2/libs/bcpkix-fips-2.1.8.jar
 
 ```
 Note that the version numbers for Kafka, the Snowflake Kafka connector, and the Snowpipe Streaming SDK are dynamic, as new versions are continually published. We are using the version numbers that have been validated to work.
@@ -206,9 +207,9 @@ bootstrap.servers=$BS
 
 #************SNOWFLAKE VALUE CONVERSION****************
 key.converter=org.apache.kafka.connect.storage.StringConverter
-value.converter=com.snowflake.kafka.connector.records.SnowflakeJsonConverter
-key.converter.schemas.enable=true
-value.converter.schemas.enable=true
+value.converter=org.apache.kafka.connect.json.JsonConverter
+key.converter.schemas.enable=false
+value.converter.schemas.enable=false
 #************SNOWFLAKE ****************
 
 offset.storage.file.filename=/tmp/connect.offsets
@@ -222,7 +223,6 @@ sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule require
 consumer.security.protocol=SASL_SSL
 consumer.sasl.mechanism=PLAIN
 consumer.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="\$ConnectionString" password="$CS";
-plugin.path=/home/azureuser/snowpipe-streaming/kafka_2.12-2.8.1/libs
 EOF
 
 ```
@@ -271,7 +271,7 @@ Scroll down to the list of event hubs, you will see the `streaming` event hub th
 To describe the topic, run the following commands in the VM shell:
 
 ```commandline
-$HOME/snowpipe-streaming/kafka_2.12-2.8.1/bin/kafka-topics.sh --bootstrap-server $BS --command-config $HOME/snowpipe-streaming/scripts/client.properties --describe --topic streaming
+$HOME/snowpipe-streaming/kafka_2.13-3.7.2/bin/kafka-topics.sh --bootstrap-server $BS --command-config $HOME/snowpipe-streaming/scripts/client.properties --describe --topic streaming
 ```
 
 See below example screenshot:
@@ -281,43 +281,50 @@ See below example screenshot:
 <!---------------------------->
 ## Prepare the Snowflake account for streaming
 
-#### 1. Creating user, role, and database
-First login to your Snowflake account as a power user with ACCOUNTADMIN role. 
-Then run the following SQL commands in a worksheet to create a user, database and the role that we will use in the lab.
+#### 1. Creating user, role, database, and schema
+Login to your Snowflake account as a power user with ACCOUNTADMIN role. 
+Then run the following SQL commands in a worksheet to create the dedicated streaming user, role, database, schema, and warehouse that we will use in the lab. The streaming user uses key-pair authentication only (no password).
 
 ```
 -- Set default value for multiple variables
 -- For purpose of this workshop, it is recommended to use these defaults during the exercise to avoid errors
 -- You should change them after the workshop
-SET PWD = 'Test1234567';
 SET USER = 'STREAMING_USER';
 SET DB = 'AZ_STREAMING_DB';
+SET SCHEMA = 'AZ_STREAMING_SCHEMA';
 SET WH = 'AZ_STREAMING_WH';
 SET ROLE = 'AZ_STREAMING_RL';
 
 USE ROLE ACCOUNTADMIN;
 
--- CREATE USERS
-CREATE USER IF NOT EXISTS IDENTIFIER($USER) PASSWORD=$PWD  COMMENT='STREAMING USER';
-
--- CREATE ROLES
+-- CREATE ROLE
 CREATE OR REPLACE ROLE IDENTIFIER($ROLE);
 
--- CREATE DATABASE AND WAREHOUSE
+-- CREATE USER (key-pair auth only, no password)
+-- Uses IF NOT EXISTS so it won't fail if the user already exists.
+-- The ALTER USER below ensures correct settings even for a pre-existing user.
+CREATE USER IF NOT EXISTS IDENTIFIER($USER)
+  DEFAULT_ROLE = $ROLE
+  DEFAULT_WAREHOUSE = $WH
+  COMMENT = 'Streaming connector user - key-pair auth only';
+
+ALTER USER IF EXISTS IDENTIFIER($USER) SET
+  DEFAULT_ROLE = $ROLE
+  DEFAULT_WAREHOUSE = $WH
+  DISABLED = FALSE;
+
+-- CREATE DATABASE, SCHEMA AND WAREHOUSE
 CREATE DATABASE IF NOT EXISTS IDENTIFIER($DB);
-USE IDENTIFIER($DB);
+CREATE OR REPLACE SCHEMA IDENTIFIER($DB).IDENTIFIER($SCHEMA);
 CREATE OR REPLACE WAREHOUSE IDENTIFIER($WH) WITH WAREHOUSE_SIZE = 'SMALL';
 
 -- GRANTS
-GRANT CREATE WAREHOUSE ON ACCOUNT TO ROLE IDENTIFIER($ROLE);
 GRANT ROLE IDENTIFIER($ROLE) TO USER IDENTIFIER($USER);
-GRANT OWNERSHIP ON DATABASE IDENTIFIER($DB) TO ROLE IDENTIFIER($ROLE);
+GRANT OWNERSHIP ON DATABASE IDENTIFIER($DB) TO ROLE IDENTIFIER($ROLE) COPY CURRENT GRANTS;
+GRANT OWNERSHIP ON SCHEMA IDENTIFIER($DB).IDENTIFIER($SCHEMA) TO ROLE IDENTIFIER($ROLE) COPY CURRENT GRANTS;
 GRANT USAGE ON WAREHOUSE IDENTIFIER($WH) TO ROLE IDENTIFIER($ROLE);
-
--- SET DEFAULTS
-ALTER USER IDENTIFIER($USER) SET DEFAULT_ROLE=$ROLE;
-ALTER USER IDENTIFIER($USER) SET DEFAULT_WAREHOUSE=$WH;
-
+GRANT CREATE TABLE ON SCHEMA IDENTIFIER($DB).IDENTIFIER($SCHEMA) TO ROLE IDENTIFIER($ROLE);
+GRANT CREATE PIPE ON SCHEMA IDENTIFIER($DB).IDENTIFIER($SCHEMA) TO ROLE IDENTIFIER($ROLE);
 
 -- RUN FOLLOWING COMMANDS TO FIND YOUR ACCOUNT IDENTIFIER, COPY IT DOWN FOR USE LATER
 -- IT WILL BE SOMETHING LIKE <organization_name>-<account_name>
@@ -335,61 +342,14 @@ Please write down the Account Identifier, we will need it later.
 
 Next we need to configure the public key for the streaming user to access Snowflake programmatically.
 
-First, in the Snowflake worksheet, replace < pubKey > with the content of the file `/home/azureuser/pub.Key` (see `step 5` by clicking on `section #2 Create an Event Hub and a Linux virtual machine in Azure cloud` in the left pane) in the following SQL command and execute.
+In the Snowflake worksheet, replace `< pubKey >` with the content of the file `/home/azureuser/pub.Key` (see `step 5` by clicking on `section #2 Create an Event Hub and a Linux virtual machine in Azure cloud` in the left pane) in the following SQL command and execute.
 ```commandline
-use role accountadmin;
-alter user streaming_user set rsa_public_key='< pubKey >';
+USE ROLE ACCOUNTADMIN;
+ALTER USER STREAMING_USER SET RSA_PUBLIC_KEY='< pubKey >';
 ```
 See below example screenshot:
 
 ![](assets/key-pair-snowflake.png)
-
-Now logout of Snowflake, sign back in as the default user `streaming_user` we just created with the associated password (default: Test1234567).
-Run the following SQL commands in a worksheet to create a schema (e.g. `AZ_STREAMING_SCHEMA`) in the default database (e.g. `AZ_STREAMING_DB`):
-
-```commandline
-SET DB = 'AZ_STREAMING_DB';
-SET SCHEMA = 'AZ_STREAMING_SCHEMA';
-
-USE IDENTIFIER($DB);
-CREATE OR REPLACE SCHEMA IDENTIFIER($SCHEMA);
-```
-
-#### 2. Install SnowSQL (optional but highly recommended)
-
-This step is optional for this workshop but is highly recommended if you prefer to use the CLI to interact with Snowflake later instead of the web console.
-
-[SnowSQL](https://docs.snowflake.com/en/user-guide/snowsql.html) is the command line client for connecting to Snowflake to execute SQL queries and perform all DDL and DML operations, including loading data into and unloading data out of database tables.
-
-To install SnowSQL. Execute the following commands on the Linux Session Manager console:
-```commandline
-curl https://sfc-repo.snowflakecomputing.com/snowsql/bootstrap/1.2/linux_x86_64/snowsql-1.2.24-linux_x86_64.bash -o /tmp/snowsql-1.2.24-linux_x86_64.bash
-echo -e "~/bin \n y" > /tmp/ans
-bash /tmp/snowsql-1.2.24-linux_x86_64.bash < /tmp/ans
-
-```
-See below example screenshot:
-
-![](assets/install-snowsql.png)
-
-Next set the environment variable for Snowflake Private Key Phrase:
-```commandline
-export SNOWSQL_PRIVATE_KEY_PASSPHRASE=<key phrase you set up when running openssl previously>
-```
-Note that you should add the command above in the ~/.bashrc file to preserve this environment variable across sessions.
-```commandline
-echo "export SNOWSQL_PRIVATE_KEY_PASSPHRASE=$SNOWSQL_PRIVATE_KEY_PASSPHRASE" >> ~/.bashrc
-```
-
-Now you can execute this command to interact with Snowflake:
-
-```commandline
-$HOME/bin/snowsql -a <Snowflake Account Identifier> -u streaming_user --private-key-path $HOME/rsa_key.p8 -d az_streaming_db -s az_streaming_schema
-```
-
-Type `Ctrl-D` to get out of SnowSQL session.
-
-You can edit the [`~/.snowsql/config`](https://docs.snowflake.com/en/user-guide/snowsql-config.html#snowsql-config-file) file to set default parameters and eliminate the need to specify them every time you run snowsql.
 
 At this point, the Snowflake setup is complete.
 
@@ -451,33 +411,36 @@ See below example screen capture.
 
 #### 2. Create a Snowflake Kafka connect configuration file
 
+Note that the High Performance (HP) connector (v4.x) will auto-create a default PIPE object named `AZ_STREAMING_TBL-STREAMING` in the target schema when the connector starts. This is why the `GRANT CREATE PIPE` was added earlier.
+
 Run the following commands to generate a configuration file for the Kafka connector.
 
 ```commandline
 dir=/home/azureuser/snowpipe-streaming/scripts
 cat << EOF > $dir/snowflakeconnectorAZ.properties
-name=snowpipeStreaming
-connector.class=com.snowflake.kafka.connector.SnowflakeSinkConnector
+name=snowpipeStreamingHP
+connector.class=com.snowflake.kafka.connector.SnowflakeStreamingSinkConnector
 tasks.max=4
 topics=streaming
 snowflake.private.key.passphrase=$key_pass
 snowflake.database.name=AZ_STREAMING_DB
 snowflake.schema.name=AZ_STREAMING_SCHEMA
 snowflake.topic2table.map=streaming:AZ_STREAMING_TBL
-buffer.count.records=10000
-buffer.flush.time=5
-buffer.size.bytes=20000000
 snowflake.url.name=$clstr_url
 snowflake.user.name=$user
 snowflake.private.key=$priv_key
 snowflake.role.name=AZ_STREAMING_RL
-snowflake.ingestion.method=snowpipe_streaming
-snowflake.enable.schematization=false
+snowflake.ingestion.method=SNOWPIPE_STREAMING
+snowflake.streaming.v2.enabled=true
+snowflake.enable.schematization=TRUE
+buffer.count.records=10000
+buffer.flush.time=10
+buffer.size.bytes=20000000
 value.converter.schemas.enable=false
-jmx=true
 key.converter=org.apache.kafka.connect.storage.StringConverter
-valur.converter=com.snowflake.kafka.connector.records.SnowflakeJsonConverter
+value.converter=org.apache.kafka.connect.json.JsonConverter
 errors.tolerance=all
+errors.log.enable=true
 EOF
 ```
 
@@ -488,9 +451,11 @@ Finally, we are ready to start ingesting data into the Snowflake table.
 
 #### 1. Start the Kafka Connector for Snowpipe streaming
 
+> **Important:** If your Snowflake account has a [network policy](https://docs.snowflake.com/en/user-guide/network-policies) enabled, make sure the VM's public IP is included in the allowed IP list. Otherwise, the connector will fail to connect to Snowflake with an IP access denied error.
+
 Go back to the Linux console and execute the following commands to start the Kafka connector.
 ```commandline
-$HOME/snowpipe-streaming/kafka_2.12-2.8.1/bin/connect-standalone.sh $HOME/snowpipe-streaming/scripts/connect-standalone.properties $HOME/snowpipe-streaming/scripts/snowflakeconnectorAZ.properties
+$HOME/snowpipe-streaming/kafka_2.13-3.7.2/bin/connect-standalone.sh $HOME/snowpipe-streaming/scripts/connect-standalone.properties $HOME/snowpipe-streaming/scripts/snowflakeconnectorAZ.properties
 ```
 
 If everything goes well, you should see something similar to screen capture below:
@@ -503,14 +468,18 @@ Leave this screen open and let the connector continue to run.
 Open up a new ssh session connection to the VM. In the shell, run the following command:
 
 ```commandline
-curl --connect-timeout 5 http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8502/opensky | $HOME/snowpipe-streaming/kafka_2.12-2.8.1/bin/kafka-console-producer.sh --broker-list $BS --producer.config $HOME/snowpipe-streaming/scripts/client.properties --topic streaming
+curl --connect-timeout 5 http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8502/opensky | \
+jq -c '.[]' | \
+$HOME/snowpipe-streaming/kafka_2.13-3.7.2/bin/kafka-console-producer.sh --broker-list $BS --producer.config $HOME/snowpipe-streaming/scripts/client.properties --topic streaming
 ```
 You should see response similar to screen capture below if everything works well.
 
 ![](assets/producer.png)
 
 Note that in the script above, the producer queries a [Rest API](http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8502/opensky ) that provides real-time flight data over the San Francisco 
-Bay Area in JSON format. The data includes information such as timestamps, [icao](https://icao.usmission.gov/mission/icao/#:~:text=Home%20%7C%20About%20the%20Mission%20%7C%20U.S.,civil%20aviation%20around%20the%20world.) numbers, flight IDs, destination airport, longitude, 
+Bay Area in JSON format. The API returns a JSON array, so we use `jq -c '.[]'` to break it into individual JSON objects — one per Kafka message. This is required because the HP connector with schematization enabled expects each message to be a flat JSON object whose keys map to table columns.
+
+The data includes information such as timestamps, [icao](https://icao.usmission.gov/mission/icao/#:~:text=Home%20%7C%20About%20the%20Mission%20%7C%20U.S.,civil%20aviation%20around%20the%20world.) numbers, flight IDs, destination airport, longitude, 
 latitude, and altitude of the aircraft, etc. The data is ingested into the `streaming` topic on the event hub and 
 then picked up by the Snowpipe streaming Kafka connector, which delivers it directly into a Snowflake 
 table `az_streaming_db.az_streaming_schema.az_streaming_tbl`.
@@ -520,7 +489,7 @@ table `az_streaming_db.az_streaming_schema.az_streaming_tbl`.
 <!---------------------------->
 ## Query ingested data in Snowflake
 
-Now, switch back to the Snowflake console and make sure that you signed in as the default user `streaming_user`. 
+Now, switch back to the Snowflake console and switch to the role `AZ_STREAMING_RL`. 
 The data should have been streamed into a table, ready for further processing.
 
 #### 1. Query the raw data
@@ -529,54 +498,56 @@ To verify that data has been streamed into Snowflake, execute the following SQL 
 ```sh
 use az_streaming_db;
 use schema az_streaming_schema;
-show channels in table az_streaming_tbl;
-```
-You should see that there are two channels, corresponding to the two partitions created earlier in the topic.
-![](assets/channels.png). 
 
-Note that, unlike the screen capture above, at this point, you should only see one row in the table, as we have only ingested data once. We will see new rows being added later as we continue to ingest more data.
+-- Check the default pipe status (auto-created by HP connector)
+SELECT SYSTEM$PIPE_STATUS('AZ_STREAMING_DB.AZ_STREAMING_SCHEMA."AZ_STREAMING_TBL-STREAMING"');
+
+-- Show all pipes in the schema
+SHOW PIPES IN SCHEMA AZ_STREAMING_DB.AZ_STREAMING_SCHEMA;
+```
+You should see the auto-created pipe `AZ_STREAMING_TBL-STREAMING` with `executionState=RUNNING`.
+
+Note that, at this point, you should only see one batch of rows in the table, as we have only ingested data once. We will see new rows being added later as we continue to ingest more data.
 
 Now run the following query on the table.
 ```
 select * from az_streaming_tbl;
 ```
-You should see there are two columns in the table: `RECORD_METADATA` and `RECORD_CONTENT` as shown in the screen capture below.
+With schematization enabled, the HP connector automatically creates columns from the JSON keys. You should see columns like `RECORD_METADATA`, `ID`, `ICAO`, `LAT`, `LON`, `ALT`, `ORIG`, `DEST`, and `UTC` — no manual flattening needed.
 
 ![](assets/raw_data.png)
-The `RECORD_CONTENT` column is an JSON array that needs to be flattened.
 
-#### 2. Flatten the raw JSON data
-Now execute the following SQL commands to flatten the raw JSONs and create a materialized view with multiple columns based on the key names.
+#### 2. Create a view with derived columns
+Now execute the following SQL commands to create a convenience view with timestamps and geohashes for visualization.
 
 ```sh
 create or replace view flights_vw
   as select
-    f.value:utc::timestamp_ntz ts_utc,
-    CONVERT_TIMEZONE('UTC','America/Los_Angeles',ts_utc::timestamp_ntz) as ts_pt,
-    f.value:alt::integer alt,
-    f.value:dest::string dest,
-    f.value:orig::string orig,
-    f.value:id::string id,
-    f.value:icao::string icao,
-    f.value:lat::float lat,
-    f.value:lon::float lon,
+    to_timestamp_ntz(utc) as ts_utc,
+    CONVERT_TIMEZONE('UTC','America/Los_Angeles',ts_utc) as ts_pt,
+    alt,
+    dest,
+    orig,
+    id,
+    icao,
+    lat,
+    lon,
     st_geohash(to_geography(ST_MAKEPOINT(lon, lat)),12) geohash,
     year(ts_pt) yr,
     month(ts_pt) mo,
     day(ts_pt) dd,
     hour(ts_pt) hr
-FROM   az_streaming_tbl,
-       Table(Flatten(az_streaming_tbl.record_content)) f;
+FROM   az_streaming_tbl;
 ```
 
-The SQL commands create a view, convert timestamps to different time zones, and use Snowflake's [Geohash function](https://docs.snowflake.com/en/sql-reference/functions/st_geohash.html)  to generate geohashes that can be used in time-series visualization tools like Grafana
+The SQL commands create a view that converts the epoch timestamp to a proper timestamp, applies time zone conversion, and uses Snowflake's [Geohash function](https://docs.snowflake.com/en/sql-reference/functions/st_geohash.html) to generate geohashes that can be used in time-series visualization tools like Grafana.
 
 Let's query the view `flights_vw` now.
 ```sh
 select * from flights_vw;
 ```
 
-As a result, you will see a nicely structured output with columns derived from the JSONs
+As a result, you will see a nicely structured output with derived timestamp and geohash columns.
 ![](assets/materialized_view.png)
 
 #### 3. Stream real-time flight data continuously to Snowflake
@@ -588,7 +559,9 @@ Go back to the Linux session and run the following script.
 ```sh
 while true
 do
-  curl --connect-timeout 5 -k http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8502/opensky | $HOME/snowpipe-streaming/kafka_2.12-2.8.1/bin/kafka-console-producer.sh --broker-list $BS --producer.config $HOME/snowpipe-streaming/scripts/client.properties --topic streaming
+  curl --connect-timeout 5 -k http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8502/opensky | \
+  jq -c '.[]' | \
+  $HOME/snowpipe-streaming/kafka_2.13-3.7.2/bin/kafka-console-producer.sh --broker-list $BS --producer.config $HOME/snowpipe-streaming/scripts/client.properties --topic streaming
   sleep 10
 done
 
@@ -605,6 +578,9 @@ For Snowflake cleanup, execute the following SQL commands.
 ```commandline
 USE ROLE ACCOUNTADMIN;
 
+-- Drop the auto-created default pipe (HP connector)
+DROP PIPE IF EXISTS AZ_STREAMING_DB.AZ_STREAMING_SCHEMA."AZ_STREAMING_TBL-STREAMING";
+
 DROP DATABASE AZ_STREAMING_DB;
 DROP WAREHOUSE AZ_STREAMING_WH;
 DROP ROLE AZ_STREAMING_RL;
@@ -616,13 +592,14 @@ DROP USER IF EXISTS STREAMING_USER;
 <!---------------------------->
 ## Conclusion and Resources
 
-In this lab, we built a demo to show how to ingest time-series data using Snowpipe streaming and Kafka with low latency. We demonstrated this using an Azure event hub and the Kafka connector for Snowpipe streaming hosted on a VM. You can also containerize the connector on the [Azure Kubernetes Services (AKS)](https://azure.microsoft.com/en-us/products/kubernetes-service) to leverage the benefits of scability and manageability.
+In this lab, we built a demo to show how to ingest time-series data using the Snowflake High Performance (HP) Kafka Connector (v4.x) with Snowpipe Streaming and Azure Event Hubs with low latency. We demonstrated this using a self-managed Kafka connector on an Azure VM. You can also containerize the connector on the [Azure Kubernetes Services (AKS)](https://azure.microsoft.com/en-us/products/kubernetes-service) to leverage the benefits of scalability and manageability.
 
 Related Resources
 
-- [Snowpipe Streaming Demystified](https://medium.com/snowflake/snowpipe-streaming-demystified-e1ee385c6d9c)
+- [Snowflake High Performance (HP) Kafka Connector](https://docs.snowflake.com/en/connectors/kafkahp/setup-kafka)
+- [Snowflake Kafka Connector Overview](https://docs.snowflake.com/en/user-guide/kafka-connector-overview)
+- [Snowpipe Streaming Overview](https://docs.snowflake.com/en/user-guide/data-load-snowpipe-streaming-overview)
 - [Getting started with Snowflake](/en/developers/guides/)
-- [Snowflake for Data Sharing](/Workloads/data-sharing/)
 - [Snowflake Marketplace](/en/data-cloud/marketplace/)
 - [Azure Event Hubs](https://azure.microsoft.com/en-us/products/event-hubs)
 - [Snowflake on Azure Marketplace](https://azuremarketplace.microsoft.com/en-us/marketplace/apps/snowflake.snowflake_contact_me?tab=overview)
