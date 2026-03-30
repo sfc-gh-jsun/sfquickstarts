@@ -458,8 +458,7 @@ Go back to the Linux console and execute the following commands to start the Kaf
 $HOME/snowpipe-streaming/kafka_2.13-3.7.2/bin/connect-standalone.sh $HOME/snowpipe-streaming/scripts/connect-standalone.properties $HOME/snowpipe-streaming/scripts/snowflakeconnectorAZ.properties
 ```
 
-If everything goes well, you should see something similar to screen capture below:
-![](assets/snowpipe-streaming-kc.png)
+If everything goes well, you should see the connector start up and begin polling the topic for messages.
 
 Leave this screen open and let the connector continue to run.
 
@@ -472,9 +471,7 @@ curl --connect-timeout 5 http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8
 jq -c '.[]' | \
 $HOME/snowpipe-streaming/kafka_2.13-3.7.2/bin/kafka-console-producer.sh --broker-list $BS --producer.config $HOME/snowpipe-streaming/scripts/client.properties --topic streaming
 ```
-You should see response similar to screen capture below if everything works well.
-
-![](assets/producer.png)
+You should see the curl output with a successful HTTP response.
 
 Note that in the script above, the producer queries a [Rest API](http://ecs-alb-1504531980.us-west-2.elb.amazonaws.com:8502/opensky ) that provides real-time flight data over the San Francisco 
 Bay Area in JSON format. The API returns a JSON array, so we use `jq -c '.[]'` to break it into individual JSON objects — one per Kafka message. This is required because the HP connector with schematization enabled expects each message to be a flat JSON object whose keys map to table columns.
